@@ -7,9 +7,10 @@
 using namespace std;
 
 void ProcessClient() {
+    // !! FILE_FLAG_OVERLAPPED !! -> ASENKRON çalýþmayý saðlar... BU olmadan read,write iþlemleri tamamlanana kadar bekler //ReadFileEx ve WriteFileEx OVERLAPPED flag olmadan çalýþmaz
     HANDLE hPipe = CreateNamedPipe(
         PIPE_NAME,
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, // DUPLEX -> Hem Client hem de Server read - write iznine sahip
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
         PIPE_UNLIMITED_INSTANCES,
         BUFFER_SIZE,
@@ -40,6 +41,10 @@ void ProcessClient() {
     }
 
    cout << "Waiting for client to connect..." << endl;
+    //dwMilliseconds parametresi:
+    // is INFINITE, the function will return only when the object is signaled.
+    // is 0 , if object not signaled -> wait state'e girme hemen return
+    // is non-zero, object signalled olana göre ya da interval geçene kadar fonksiyon bekler.
 
     if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
         cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
@@ -117,7 +122,7 @@ void ProcessClient() {
         return;
     }
 
-   cout << "Result sent: " << resultStr << endl;
+   cout << "Result sent: \n" << resultStr << endl;
 
     CloseHandle(overlapped.hEvent);
     CloseHandle(hPipe);
