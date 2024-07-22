@@ -4,6 +4,7 @@
 
 #define PIPE_NAME L"\\\\.\\pipe\\AsyncPipe"
 #define BUFFER_SIZE 1024
+using namespace std;
 
 void ProcessClient() {
     HANDLE hPipe = CreateNamedPipe(
@@ -17,7 +18,7 @@ void ProcessClient() {
         NULL);
 
     if (hPipe == INVALID_HANDLE_VALUE) {
-        std::cerr << "CreateNamedPipe failed, GLE=" << GetLastError() << std::endl;
+        cerr << "CreateNamedPipe failed, GLE=" << GetLastError() << endl;
         return;
     }
 
@@ -25,23 +26,23 @@ void ProcessClient() {
     overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (overlapped.hEvent == NULL) {
-        std::cerr << "CreateEvent failed, GLE=" << GetLastError() << std::endl;
+        cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
         CloseHandle(hPipe);
         return;
     }
 
     BOOL connected = ConnectNamedPipe(hPipe, &overlapped);
     if (!connected && GetLastError() != ERROR_IO_PENDING) {
-        std::cerr << "ConnectNamedPipe failed, GLE=" << GetLastError() << std::endl;
+       cerr << "ConnectNamedPipe failed, GLE=" << GetLastError() <<endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    std::cout << "Waiting for client to connect..." << std::endl;
+   cout << "Waiting for client to connect..." << endl;
 
     if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
-        std::cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << std::endl;
+        cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
@@ -52,30 +53,30 @@ void ProcessClient() {
 
     BOOL readResult = ReadFile(hPipe, buffer, BUFFER_SIZE, &bytesRead, &overlapped);
     if (!readResult && GetLastError() != ERROR_IO_PENDING) {
-        std::cerr << "ReadFile failed, GLE=" << GetLastError() << std::endl;
+        cerr << "ReadFile failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
     if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
-        std::cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << std::endl;
+        cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
     if (!GetOverlappedResult(hPipe, &overlapped, &bytesRead, FALSE)) {
-        std::cerr << "GetOverlappedResult failed, GLE=" << GetLastError() << std::endl;
+        cerr << "GetOverlappedResult failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    std::string receivedData(buffer, bytesRead);
-    std::cout << "Received: " << receivedData << std::endl;
+    string receivedData(buffer, bytesRead);
+    cout << "Received: " << receivedData << endl;
 
-    std::istringstream iss(receivedData);
+    istringstream iss(receivedData);
     double val1, val2;
     char op;
     iss >> val1 >> val2 >> op;
@@ -86,37 +87,37 @@ void ProcessClient() {
     case '-': result = val1 - val2; break;
     case '*': result = val1 * val2; break;
     case '/': result = (val2 != 0) ? val1 / val2 : 0; break;
-    default: std::cerr << "Invalid operator" << std::endl; break;
+    default: cerr << "Invalid operator" << endl; break;
     }
 
-    std::ostringstream oss;
+    ostringstream oss;
     oss << result;
-    std::string resultStr = oss.str();
+    string resultStr = oss.str();
 
     DWORD bytesWritten = 0;
     BOOL writeResult = WriteFile(hPipe, resultStr.c_str(), resultStr.size(), &bytesWritten, &overlapped);
     if (!writeResult && GetLastError() != ERROR_IO_PENDING) {
-        std::cerr << "WriteFile failed, GLE=" << GetLastError() << std::endl;
+        cerr << "WriteFile failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
     if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
-        std::cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << std::endl;
+        cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
     if (!GetOverlappedResult(hPipe, &overlapped, &bytesWritten, FALSE)) {
-        std::cerr << "GetOverlappedResult failed, GLE=" << GetLastError() << std::endl;
+        cerr << "GetOverlappedResult failed, GLE=" << GetLastError() << endl;
         CloseHandle(overlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    std::cout << "Result sent: " << resultStr << std::endl;
+   cout << "Result sent: " << resultStr << endl;
 
     CloseHandle(overlapped.hEvent);
     CloseHandle(hPipe);
