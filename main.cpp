@@ -6,11 +6,16 @@
 #define BUFFER_SIZE 1024
 using namespace std;
 
+void CALLBACK ReadCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped);
+void CALLBACK WriteCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped);
+
+HANDLE hPipe;
+char buffer[BUFFER_SIZE];
+
 void ProcessClient() {
-    // !! FILE_FLAG_OVERLAPPED !! -> ASENKRON çalýþmayý saðlar... BU olmadan read,write iþlemleri tamamlanana kadar bekler //ReadFileEx ve WriteFileEx OVERLAPPED flag olmadan çalýþmaz
-    HANDLE hPipe = CreateNamedPipe(
+    hPipe = CreateNamedPipe(
         PIPE_NAME,
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, // DUPLEX -> Hem Client hem de Server read - write iznine sahip
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
         PIPE_UNLIMITED_INSTANCES,
         BUFFER_SIZE,
@@ -23,67 +28,78 @@ void ProcessClient() {
         return;
     }
 
-    OVERLAPPED overlapped = {};
-    overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    OVERLAPPED connectOverlapped = {};
+    connectOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    if (overlapped.hEvent == NULL) {
+    if (connectOverlapped.hEvent == NULL) {
         cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
         CloseHandle(hPipe);
         return;
     }
 
-    BOOL connected = ConnectNamedPipe(hPipe, &overlapped);
+    BOOL connected = ConnectNamedPipe(hPipe, &connectOverlapped);
     if (!connected && GetLastError() != ERROR_IO_PENDING) {
-       cerr << "ConnectNamedPipe failed, GLE=" << GetLastError() <<endl;
-        CloseHandle(overlapped.hEvent);
+        if (GetLastError() == ERROR_PIPE_CONNECTED) {
+            SetEvent(connectOverlapped.hEvent);
+        }
+        else {
+            cerr << "ConnectNamedPipe failed, GLE=" << GetLastError() << endl;
+            CloseHandle(hPipe);
+            CloseHandle(connectOverlapped.hEvent);
+            return;
+        }
+    }
+
+    cout << "Waiting for client to connect..." << endl;
+
+    DWORD waitResult = WaitForSingleObjectEx(connectOverlapped.hEvent, INFINITE, TRUE);
+    if (waitResult != WAIT_OBJECT_0) {
+        cerr << "WaitForSingleObjectEx failed, GLE=" << GetLastError() << endl;
+        CloseHandle(connectOverlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-   cout << "Waiting for client to connect..." << endl;
-    //dwMilliseconds parametresi:
-    // is INFINITE, the function will return only when the object is signaled.
-    // is 0 , if object not signaled -> wait state'e girme hemen return
-    // is non-zero, object signalled olana göre ya da interval geçene kadar fonksiyon bekler.
+    CloseHandle(connectOverlapped.hEvent);
 
-    if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
-        cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
+    OVERLAPPED readOverlapped = {};
+    readOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+    if (readOverlapped.hEvent == NULL) {
+        cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
         CloseHandle(hPipe);
         return;
     }
 
-    char buffer[BUFFER_SIZE] = { 0 };
-    DWORD bytesRead = 0;
-
-    BOOL readResult = ReadFile(hPipe, buffer, BUFFER_SIZE, &bytesRead, &overlapped);
+    BOOL readResult = ReadFileEx(hPipe, buffer, BUFFER_SIZE, &readOverlapped, ReadCompletionRoutine);
     if (!readResult && GetLastError() != ERROR_IO_PENDING) {
-        cerr << "ReadFile failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
+        cerr << "ReadFileEx failed, GLE=" << GetLastError() << endl;
+        CloseHandle(readOverlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
-        cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
+    // Keep the main thread running to allow the completion routine to execute.
+    while (true) {
+        SleepEx(INFINITE, TRUE);
+    }
+}
+
+void CALLBACK ReadCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped) {
+    if (dwErrorCode != ERROR_SUCCESS) {
+        cerr << "ReadCompletionRoutine failed, GLE=" << dwErrorCode << endl;
+        CloseHandle(lpOverlapped->hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    if (!GetOverlappedResult(hPipe, &overlapped, &bytesRead, FALSE)) {
-        cerr << "GetOverlappedResult failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
-        CloseHandle(hPipe);
-        return;
-    }
+    int val1, val2;
+    char op;
 
-    string receivedData(buffer, bytesRead);
+    string receivedData(buffer, dwNumberOfBytesTransfered);
     cout << "Received: " << receivedData << endl;
 
     istringstream iss(receivedData);
-    double val1, val2;
-    char op;
     iss >> val1 >> val2 >> op;
 
     double result = 0.0;
@@ -99,32 +115,39 @@ void ProcessClient() {
     oss << result;
     string resultStr = oss.str();
 
-    DWORD bytesWritten = 0;
-    BOOL writeResult = WriteFile(hPipe, resultStr.c_str(), resultStr.size(), &bytesWritten, &overlapped);
+    OVERLAPPED writeOverlapped = {};
+    writeOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+    if (writeOverlapped.hEvent == NULL) {
+        cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
+        CloseHandle(lpOverlapped->hEvent);
+        CloseHandle(hPipe);
+        return;
+    }
+
+    BOOL writeResult = WriteFileEx(hPipe, resultStr.c_str(), resultStr.size(), &writeOverlapped, WriteCompletionRoutine);
     if (!writeResult && GetLastError() != ERROR_IO_PENDING) {
-        cerr << "WriteFile failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
+        cerr << "WriteFileEx failed, GLE=" << GetLastError() << endl;
+        CloseHandle(lpOverlapped->hEvent);
+        CloseHandle(writeOverlapped.hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    if (WaitForSingleObject(overlapped.hEvent, INFINITE) != WAIT_OBJECT_0) {
-        cerr << "WaitForSingleObject failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
+    CloseHandle(lpOverlapped->hEvent);
+}
+
+void CALLBACK WriteCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped) {
+    if (dwErrorCode != ERROR_SUCCESS) {
+        cerr << "WriteCompletionRoutine failed, GLE=" << dwErrorCode << endl;
+        CloseHandle(lpOverlapped->hEvent);
         CloseHandle(hPipe);
         return;
     }
 
-    if (!GetOverlappedResult(hPipe, &overlapped, &bytesWritten, FALSE)) {
-        cerr << "GetOverlappedResult failed, GLE=" << GetLastError() << endl;
-        CloseHandle(overlapped.hEvent);
-        CloseHandle(hPipe);
-        return;
-    }
+    cout << "Result sent" << endl;
 
-   cout << "Result sent: \n" << resultStr << endl;
-
-    CloseHandle(overlapped.hEvent);
+    CloseHandle(lpOverlapped->hEvent);
     CloseHandle(hPipe);
 }
 
