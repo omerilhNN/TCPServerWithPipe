@@ -70,7 +70,7 @@ void ProcessClient() {
 
     OVERLAPPED readOverlapped = {};
     readOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-
+    cout << "Connected" << endl;
     if (readOverlapped.hEvent == NULL) {
         cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
         CloseHandle(hPipe);
@@ -86,11 +86,13 @@ void ProcessClient() {
     }
 
     DWORD val;
-    // Keep the main thread running to allow the completion routine to execute.
+     //Keep the main thread running to allow the completion routine to execute. // completion routinelerin çaðýrýlabilmesi için
     while (true) {
         //TRUE: Callback function olduðunda direkt return
         //FALSE: Callback function olduðunda direkt return yapmaz time-out süresi geçene kadar bekler
         //The return value is WAIT_IO_COMPLETION -> Bir veya birden fazla Callback function return yaptýðýnda // bAlertable TRUE iken
+
+        //Alertable wait state'de kalmasýný saðlar -> Completion Routineler bu sayede çaðýrýlabilir
         val = SleepEx(INFINITE, TRUE);
         if (GetLastError() == WAIT_IO_COMPLETION) {
             break;
