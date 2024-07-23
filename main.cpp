@@ -29,7 +29,9 @@ void ProcessClient() {
     }
 
     OVERLAPPED connectOverlapped = {};
-    connectOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    //If the CreateEvent function fails, the return value is NULL
+    //Önceden var olan objenin handle'ýný return ederse -> ERROR_ALREADY_EXISTS.
+    connectOverlapped.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (connectOverlapped.hEvent == NULL) {
         cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
@@ -37,9 +39,13 @@ void ProcessClient() {
         return;
     }
 
+    //returns a nonzero value the first time it is called for a pipe instance that is disconnected from a previous client.
+
     BOOL connected = ConnectNamedPipe(hPipe, &connectOverlapped);
+    //bir eventin bu þekilde signaled state'e geçirilmesi neyi ifade eder
     if (!connected && GetLastError() != ERROR_IO_PENDING) {
         if (GetLastError() == ERROR_PIPE_CONNECTED) {
+            //Event objectini Signaled state'e getirir bekleyen threadlerin iþine devam etmesini saðlar
             SetEvent(connectOverlapped.hEvent);
         }
         else {
@@ -50,7 +56,7 @@ void ProcessClient() {
         }
     }
 
-    cout << "Waiting for client to connect..." << endl;
+    cout << "Waiting for client..." << endl;
 
     DWORD waitResult = WaitForSingleObjectEx(connectOverlapped.hEvent, INFINITE, TRUE);
     if (waitResult != WAIT_OBJECT_0) {
@@ -79,9 +85,16 @@ void ProcessClient() {
         return;
     }
 
+    DWORD val;
     // Keep the main thread running to allow the completion routine to execute.
     while (true) {
-        SleepEx(INFINITE, TRUE);
+        //TRUE: Callback function olduðunda direkt return
+        //FALSE: Callback function olduðunda direkt return yapmaz time-out süresi geçene kadar bekler
+        //The return value is WAIT_IO_COMPLETION -> Bir veya birden fazla Callback function return yaptýðýnda // bAlertable TRUE iken
+        val = SleepEx(INFINITE, TRUE);
+        if (GetLastError() == WAIT_IO_COMPLETION) {
+            break;
+        }
     }
 }
 
@@ -96,9 +109,11 @@ void CALLBACK ReadCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTran
     int val1, val2;
     char op;
 
+    //receivedData'ya buffer'ý kopyalama iþlemi yap
     string receivedData(buffer, dwNumberOfBytesTransfered);
     cout << "Received: " << receivedData << endl;
 
+    //received data'yý val1 val2 op olarak ayrýþtýr
     istringstream iss(receivedData);
     iss >> val1 >> val2 >> op;
 
@@ -111,6 +126,7 @@ void CALLBACK ReadCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTran
     default: cerr << "Invalid operator" << endl; break;
     }
 
+    //verileri stringi formatlama iþlemi
     ostringstream oss;
     oss << result;
     string resultStr = oss.str();
@@ -125,6 +141,7 @@ void CALLBACK ReadCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTran
         return;
     }
 
+    //c_str-> stringi null terminated olacak þekilde ayarlar // ham veriyi verir.
     BOOL writeResult = WriteFileEx(hPipe, resultStr.c_str(), resultStr.size(), &writeOverlapped, WriteCompletionRoutine);
     if (!writeResult && GetLastError() != ERROR_IO_PENDING) {
         cerr << "WriteFileEx failed, GLE=" << GetLastError() << endl;
@@ -144,11 +161,12 @@ void CALLBACK WriteCompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTra
         CloseHandle(hPipe);
         return;
     }
-
-    cout << "Result sent" << endl;
+    cout << "Result sent \n" << endl;
 
     CloseHandle(lpOverlapped->hEvent);
     CloseHandle(hPipe);
+
+    ProcessClient();
 }
 
 int main() {
