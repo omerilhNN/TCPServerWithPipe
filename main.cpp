@@ -31,7 +31,7 @@ void ProcessClient() {
     OVERLAPPED connectOverlapped = {};
     //If the CreateEvent function fails, the return value is NULL
     //Önceden var olan objenin handle'ýný return ederse -> ERROR_ALREADY_EXISTS.
-    connectOverlapped.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    connectOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (connectOverlapped.hEvent == NULL) {
         cerr << "CreateEvent failed, GLE=" << GetLastError() << endl;
@@ -92,8 +92,14 @@ void ProcessClient() {
         //FALSE: Callback function olduðunda direkt return yapmaz time-out süresi geçene kadar bekler
         //The return value is WAIT_IO_COMPLETION -> Bir veya birden fazla Callback function return yaptýðýnda // bAlertable TRUE iken
 
-        //Alertable wait state'de kalmasýný saðlar -> Completion Routineler bu sayede çaðýrýlabilir
-        val = SleepEx(INFINITE, TRUE);
+        DWORD bytesTransferred;
+        BOOL result = GetOverlappedResultEx(hPipe, &readOverlapped, &bytesTransferred, INFINITE, TRUE);
+        if (!result) {
+            cerr << "GetOverlappedResultEx failed, GLE=" << GetLastError() << endl;
+            CloseHandle(readOverlapped.hEvent);
+            CloseHandle(hPipe);
+            return;
+        }
         if (GetLastError() == WAIT_IO_COMPLETION) {
             break;
         }
